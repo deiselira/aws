@@ -1,0 +1,82 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: >-
+  Transit Gateway Template. Este template configura Transtit Gateway e ResourceShare
+Parameters:
+  Ambiente:
+    Type: String
+    Description: Ambiente para Identificar o Transit Gateway. prod, dev ou qa
+    Default: prod
+  ASN:
+    Type: String
+    Description: Numero ASN unico para TransitGateway. Escolher entre 64512 a 65534 para 16bits e 4200000000 a 4294967294 para ASNs de 32 bits.
+    Default: 65300
+  Region:
+    Type: String
+    Description: Regiao onde será aplicado o template
+    Default: us-east-1
+Resources:
+  #Cria o Transit Gateway sem Association ou Propagation para garantir isolamento entre as contas e maior controle.
+  TransitGateway:
+    Type: "AWS::EC2::TransitGateway"
+    Properties:
+      AmazonSideAsn: !Ref ASN
+      Description: "Transit Gateway Networking entre VPC e On-Prem VPN"
+      AutoAcceptSharedAttachments: "enable"
+      DefaultRouteTableAssociation: "disable"   
+      DefaultRouteTablePropagation: "disable" 
+      DnsSupport: "enable"
+      VpnEcmpSupport: "enable"
+      Tags:
+          - Key: "Name"
+            Value: !Join [ "", [ "tg-", !Ref Ambiente, "-", !Ref Region] ]
+  #Cria o compartilhamento do Transit Gateway para acesso a demais contas que estiverem listadas no PRINCIPALS.
+  TGWResourceAccessShare:
+    Type: AWS::RAM::ResourceShare
+    DependsOn: TransitGateway
+    Properties:
+      AllowExternalPrincipals: false
+      Name: "Transit Gateway Resource Share"
+      ResourceArns:
+        - !Sub "arn:aws:ec2:${Region}:${AWS::AccountId}:transit-gateway/${TransitGateway}"
+      #Adicionar o ID de cada conta aws que deva receber conectividade com este Transit Gateway
+      Principals: 
+        - "765071923189"
+        #- "aws account id"
+      Tags:
+        - Key: "Name"
+          Value: !Join [ "", [ "tg-", !Ref Ambiente, "-", !Ref Region, " Resource Share"] ] 
+  #Cria a Route Table que determina as rotas do On-Prem para as contas AWS de Workload
+  VpnToVpcRouteTable:
+    Type: AWS::EC2::TransitGatewayRouteTable
+    DependsOn: TransitGateway
+    Properties: 
+      Tags: 
+        - Key: Name
+          Value: VPN to All VPCs
+      TransitGatewayId: !Ref TransitGateway
+  #Cria a Route Table que determina as rotas das contas AWS de workload para o ambiente On-Prem
+  WorkloadvpcRouteTable:
+    Type: AWS::EC2::TransitGatewayRouteTable
+    DependsOn: TransitGateway
+    Properties: 
+      Tags: 
+        - Key: Name
+          Value: Isolated Workload VPCs to OnpremVPN
+      TransitGatewayId: !Ref TransitGateway
+Outputs:
+  TransitGateway:
+    Description: Transit Gateway Id
+    Value: !Ref TransitGateway
+    Export:
+      Name: TransitGatewayId
+  VpnToVpcRouteTable:
+    Description: Route Table Transit Gateway VPN-VPC
+    Value: !Ref VpnToVpcRouteTable
+    Export:
+      Name: VpnToVpcRouteTableId
+  WorkloadvpcRouteTable:
+    Description: Route Table Transit Gateway Workload
+    Value: !Ref WorkloadvpcRouteTable
+    Export:
+      Name: WorkloadvpcRouteTableId    
+
